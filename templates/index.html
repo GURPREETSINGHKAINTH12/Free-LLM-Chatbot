@@ -15,6 +15,7 @@
       --accent-hover: #5b4cdb;
       --user-msg: #2d2d38;
       --bot-msg: #252530;
+      --danger: #e05c5c;
       --radius: 12px;
       --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
@@ -42,16 +43,49 @@
     }
     .chat-container {
       width: 100%;
-      max-width: 560px;
+      max-width: 640px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      min-height: 420px;
-      max-height: 70vh;
+      min-height: 460px;
+      max-height: 78vh;
     }
+    .docs-bar {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .docs-bar-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    .doc-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: var(--bot-msg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.2rem 0.6rem;
+      font-size: 0.75rem;
+      color: var(--text);
+    }
+    .doc-pill button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.85rem;
+      line-height: 1;
+    }
+    .doc-pill button:hover { color: var(--danger); }
     #chat-messages {
       flex: 1;
       overflow-y: auto;
@@ -85,6 +119,11 @@
       letter-spacing: 0.05em;
       opacity: 0.8;
       margin-bottom: 0.25rem;
+    }
+    .message .sources {
+      margin-top: 0.5rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
     }
     .input-area {
       padding: 1rem;
@@ -133,10 +172,17 @@
     }
     .controls {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
+      justify-content: space-between;
       gap: 0.75rem;
       font-size: 0.85rem;
       color: var(--text-muted);
+    }
+    .controls-left, .controls-right {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
     }
     .controls label { display: flex; align-items: center; gap: 0.35rem; }
     #temperature {
@@ -145,12 +191,24 @@
       accent-color: var(--accent);
     }
     #temperature-value { min-width: 2.5ch; }
+    .secondary-btn {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.3rem 0.65rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .secondary-btn:hover { border-color: var(--accent); }
+    .secondary-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
     .status {
       font-size: 0.75rem;
       color: var(--text-muted);
-      margin-top: 0.5rem;
+      margin-top: 0.25rem;
     }
-    .status.error { color: #e05c5c; }
+    .status.error { color: var(--danger); }
     .typing {
       opacity: 0.7;
       font-style: italic;
@@ -162,25 +220,38 @@
 </head>
 <body>
   <h1>Free LLM Chatbot</h1>
-  <p class="subtitle">Ollama (local) or Hugging Face · Last 5 messages in context</p>
+  <p class="subtitle">Ollama (local) or Hugging Face · Persistent SQLite history · Document RAG</p>
 
   <div class="chat-container">
+    <div id="docs-bar" class="docs-bar">
+      <span class="docs-bar-label">Documents:</span>
+      <span id="docs-empty" class="docs-bar-label">None uploaded</span>
+    </div>
+
     <div id="chat-messages"></div>
+
     <div class="input-area">
       <div class="input-row">
         <textarea
           id="message-input"
-          placeholder="Type a message..."
+          placeholder="Type a message or ask about uploaded files..."
           rows="1"
         ></textarea>
         <button id="send-btn" type="button">Send</button>
       </div>
       <div class="controls">
-        <label>
-          Temperature
-          <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
-        </label>
-        <span id="temperature-value">0.7</span>
+        <div class="controls-left">
+          <label>
+            Temperature
+            <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
+          </label>
+          <span id="temperature-value">0.7</span>
+        </div>
+        <div class="controls-right">
+          <input type="file" id="file-input" hidden accept=".pdf,.txt,.md,.py,.js,.ts,.json,.csv,.html,.css,.log,.yaml,.yml,.sql">
+          <button id="upload-btn" class="secondary-btn" type="button">+ Upload File</button>
+          <button id="clear-btn" class="secondary-btn danger" type="button">Clear Chat</button>
+        </div>
       </div>
       <div id="status" class="status"></div>
     </div>
@@ -194,9 +265,10 @@
     const tempSlider = document.getElementById('temperature');
     const tempValue = document.getElementById('temperature-value');
     const statusEl = document.getElementById('status');
-
-    // In-memory conversation history (last 5 messages); also sent to backend
-    let conversationHistory = [];
+    const docsBar = document.getElementById('docs-bar');
+    const fileInput = document.getElementById('file-input');
+    const uploadBtn = document.getElementById('upload-btn');
+    const clearBtn = document.getElementById('clear-btn');
 
     // Show status message
     function setStatus(text, isError = false) {
@@ -205,7 +277,7 @@
     }
 
     // Append a message to the chat UI
-    function appendMessage(role, content) {
+    function appendMessage(role, content, sources = []) {
       const div = document.createElement('div');
       div.className = 'message ' + role;
       const label = document.createElement('div');
@@ -215,8 +287,78 @@
       const text = document.createElement('div');
       text.textContent = content;
       div.appendChild(text);
+
+      if (role === 'assistant' && sources && sources.length > 0) {
+        const srcEl = document.createElement('div');
+        srcEl.className = 'sources';
+        srcEl.textContent = 'Sources: ' + sources.join(', ');
+        div.appendChild(srcEl);
+      }
+
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // Render uploaded document pills
+    function renderDocuments(docs) {
+      docsBar.innerHTML = '<span class="docs-bar-label">Documents:</span>';
+      if (!docs || docs.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'docs-bar-label';
+        empty.textContent = 'None uploaded';
+        docsBar.appendChild(empty);
+        return;
+      }
+
+      docs.forEach((doc) => {
+        const pill = document.createElement('span');
+        pill.className = 'doc-pill';
+
+        const name = document.createElement('span');
+        name.textContent = `${doc.filename} (${doc.chunks})`;
+        pill.appendChild(name);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.title = 'Remove document';
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => deleteDocument(doc.id));
+        pill.appendChild(removeBtn);
+
+        docsBar.appendChild(pill);
+      });
+    }
+
+    async function loadDocuments() {
+      try {
+        const res = await fetch('/api/documents');
+        const data = await res.json();
+        renderDocuments(data.documents || []);
+      } catch {
+        // Ignore initial load error
+      }
+    }
+
+    async function deleteDocument(docId) {
+      try {
+        const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Could not delete document');
+        await loadDocuments();
+        setStatus('Document removed.');
+      } catch (err) {
+        setStatus('Error: ' + err.message, true);
+      }
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/history');
+        const data = await res.json();
+        messagesEl.innerHTML = '';
+        (data.history || []).forEach((msg) => appendMessage(msg.role, msg.content));
+      } catch {
+        // Ignore initial load error
+      }
     }
 
     // Show "typing" indicator
@@ -228,10 +370,10 @@
           el.id = 'typing-indicator';
           el.className = 'message assistant typing';
           el.innerHTML = '<div class="role-label">Assistant</div><div>Thinking...</div>';
-          messagesEl.appendChild(el);
-          messagesEl.scrollTop = messagesEl.scrollHeight;
         }
         el.style.display = 'block';
+        messagesEl.appendChild(el);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
       } else if (el) {
         el.style.display = 'none';
       }
@@ -256,8 +398,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: message,
-            temperature: temperature,
-            history: conversationHistory
+            temperature: temperature
           })
         });
 
@@ -267,10 +408,8 @@
           throw new Error(data.detail || data.message || 'Request failed');
         }
 
-        // Update local history from backend response (last 5 messages)
-        conversationHistory = data.history || [];
         showTyping(false);
-        appendMessage('assistant', data.reply);
+        appendMessage('assistant', data.reply, data.sources || []);
         setStatus('Model: ' + (data.model_used || '—'));
       } catch (err) {
         showTyping(false);
@@ -280,6 +419,49 @@
         inputEl.focus();
       }
     }
+
+    // Upload file handler
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      uploadBtn.disabled = true;
+      setStatus('Uploading ' + file.name + '...');
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Upload failed');
+        }
+        await loadDocuments();
+        setStatus(`Uploaded ${data.document.filename} (${data.document.chunks} chunks indexed)`);
+      } catch (err) {
+        setStatus('Upload error: ' + err.message, true);
+      } finally {
+        fileInput.value = '';
+        uploadBtn.disabled = false;
+      }
+    });
+
+    // Clear chat history
+    clearBtn.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/history', { method: 'DELETE' });
+        if (!res.ok) throw new Error('Could not clear chat');
+        messagesEl.innerHTML = '';
+        setStatus('Chat history cleared.');
+      } catch (err) {
+        setStatus('Error: ' + err.message, true);
+      }
+    });
 
     // Send on button click
     sendBtn.addEventListener('click', sendMessage);
@@ -297,7 +479,7 @@
       tempValue.textContent = tempSlider.value;
     });
 
-    // Optional: check backend health on load
+    // Check backend health and restore persisted history + documents on load
     fetch('/health')
       .then(r => r.json())
       .then((data) => {
@@ -309,6 +491,8 @@
       })
       .catch(() => setStatus('Could not reach backend', true));
 
+    loadHistory();
+    loadDocuments();
     inputEl.focus();
   </script>
 </body>
