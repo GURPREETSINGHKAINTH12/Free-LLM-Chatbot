@@ -9,6 +9,10 @@ venv/
 # Environment variables and secrets
 .env
 
+# Local SQLite database
+*.db
+*.sqlite3
+
 # Editor and OS files
 .vscode/
 .DS_Store
