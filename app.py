@@ -19,6 +19,13 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 import os
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 # Set USE_HF=true and HF_TOKEN=your_token to use Hugging Face instead of Ollama
 USE_HUGGINGFACE = os.getenv("USE_HF", "false").lower() in ("true", "1", "yes")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
@@ -133,9 +140,10 @@ async def call_huggingface(
         )
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
-            f"https://api-inference.huggingface.co/models/{HF_MODEL}/v1/chat/completions",
+            "https://router.huggingface.co/v1/chat/completions",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
             json={
+                "model": HF_MODEL,
                 "messages": messages,
                 "max_tokens": 512,
                 "temperature": temperature,

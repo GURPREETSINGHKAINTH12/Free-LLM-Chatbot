@@ -228,10 +228,10 @@
           el.id = 'typing-indicator';
           el.className = 'message assistant typing';
           el.innerHTML = '<div class="role-label">Assistant</div><div>Thinking...</div>';
-          messagesEl.appendChild(el);
-          messagesEl.scrollTop = messagesEl.scrollHeight;
         }
         el.style.display = 'block';
+        messagesEl.appendChild(el);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
       } else if (el) {
         el.style.display = 'none';
       }
